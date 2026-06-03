@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  mountebank:
+    image: bbyars/mountebank:2.9.1
+    ports:
+      - "2525:2525"
+      - "4545:4545"
+    volumes:
+      - ./mountebank:/imposters
+    command: >
+      mb --configfile /imposters/imposters.json
+         --allowInjection
+         --debug
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2525/imposters"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  bank-client:
+    build: .
+    depends_on:
+      mountebank:
+        condition: service_healthy
+    environment:
+      - BANK_URL=http://mountebank:4545
+    command: node src/index.js
