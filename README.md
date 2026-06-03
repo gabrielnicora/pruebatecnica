@@ -1,4 +1,19 @@
-# pruebatecnica — POC Mountebank
+# pruebatecnica — POCs de virtualización bancaria
+
+Este repo contiene **dos POCs** de virtualización/mocking de servicios bancarios,
+para comparar herramientas:
+
+| POC | Herramienta | Alcance | Carpeta |
+|---|---|---|---|
+| 1 | [mountebank](http://www.mbtest.org/) | REST (auth, cuentas, transacciones, transferencias) | raíz (`src/`, `mountebank/`, `test/`) |
+| 2 | [Microcks](https://microcks.io) | REST + **SOAP** + **Event-Driven (Kafka)** | [`microcks/`](./microcks) |
+
+La POC de Microcks parte de **contratos** (OpenAPI/WSDL/AsyncAPI) en vez de mocks
+escritos a mano, y agrega un ejemplo SOAP y uno event-driven. Ver [`microcks/README.md`](./microcks/README.md).
+
+---
+
+## POC 1 — Mountebank
 
 POC de virtualización de servicios bancarios REST usando [mountebank](http://www.mbtest.org/).
 

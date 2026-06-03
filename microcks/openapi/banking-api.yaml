@@ -1,0 +1,372 @@
+openapi: 3.0.3
+info:
+  title: Banking API
+  version: 1.0.0
+  description: |
+    API REST del banco virtualizada con Microcks.
+    Replica los 4 servicios de la POC original: autenticación, cuentas,
+    transacciones y transferencias. Los ejemplos definidos abajo son los
+    que Microcks usa para generar los mocks y despachar las respuestas.
+
+paths:
+
+  /auth/token:
+    post:
+      operationId: postAuthToken
+      summary: Autenticación OAuth2
+      x-microcks-operation:
+        # Despacha según el campo username del body JSON
+        dispatcher: JSON_BODY
+        dispatcherRules: |
+          {
+            "exp": "/username",
+            "operator": "equals",
+            "cases": {
+              "usuario_invalido": "Invalid Auth",
+              "default": "Valid Auth"
+            }
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+            examples:
+              Valid Auth:
+                value:
+                  username: usuario_valido
+                  password: password123
+              Invalid Auth:
+                value:
+                  username: usuario_invalido
+                  password: cualquiera
+      responses:
+        '200':
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              examples:
+                Valid Auth:
+                  value:
+                    access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mock
+                    token_type: Bearer
+                    expires_in: 3600
+                    scope: accounts transactions transfers
+        '401':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                Invalid Auth:
+                  value:
+                    error: invalid_client
+                    error_description: Credenciales inválidas
+
+  /accounts/{accountId}:
+    get:
+      operationId: getAccount
+      summary: Datos y saldo de la cuenta
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+          examples:
+            ACC001:
+              value: ACC001
+            ACC002:
+              value: ACC002
+            Unknown Account:
+              value: NOTFOUND
+      responses:
+        '200':
+          description: Cuenta encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+              examples:
+                ACC001:
+                  value:
+                    id: ACC001
+                    alias: Cuenta Principal
+                    type: checking
+                    currency: ARS
+                    balance: 125430.50
+                    available: 120000.00
+                    cbu: '0720461288000004610012'
+                    owner:
+                      name: Juan Pérez
+                      cuit: 20-12345678-9
+                    status: active
+                ACC002:
+                  value:
+                    id: ACC002
+                    alias: Caja de Ahorro USD
+                    type: savings
+                    currency: USD
+                    balance: 5000.00
+                    available: 5000.00
+                    cbu: '0720461288000004610099'
+                    owner:
+                      name: Juan Pérez
+                      cuit: 20-12345678-9
+                    status: active
+        '404':
+          description: Cuenta inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                Unknown Account:
+                  value:
+                    error: account_not_found
+                    message: La cuenta no existe o no pertenece al usuario
+
+  /accounts/{accountId}/transactions:
+    get:
+      operationId: getTransactions
+      summary: Historial de movimientos de la cuenta
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+          examples:
+            ACC001:
+              value: ACC001
+      responses:
+        '200':
+          description: Listado de transacciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionList'
+              examples:
+                ACC001:
+                  value:
+                    account_id: ACC001
+                    page: 1
+                    total: 3
+                    transactions:
+                      - id: TXN001
+                        date: '2024-01-15T10:30:00Z'
+                        type: credit
+                        amount: 50000.00
+                        currency: ARS
+                        description: Transferencia recibida - ACME S.A.
+                        balance_after: 125430.50
+                        reference: REF-2024-001
+                      - id: TXN002
+                        date: '2024-01-14T15:00:00Z'
+                        type: debit
+                        amount: 12000.00
+                        currency: ARS
+                        description: Pago servicios - Empresa XYZ
+                        balance_after: 75430.50
+                        reference: REF-2024-002
+                      - id: TXN003
+                        date: '2024-01-13T09:00:00Z'
+                        type: credit
+                        amount: 87430.50
+                        currency: ARS
+                        description: Depósito inicial
+                        balance_after: 87430.50
+                        reference: REF-2024-003
+
+  /transfers:
+    post:
+      operationId: postTransfer
+      summary: Transferencia entre cuentas
+      x-microcks-operation:
+        # Despacha según el monto: 999999999 -> saldo insuficiente, resto -> OK
+        dispatcher: JSON_BODY
+        dispatcherRules: |
+          {
+            "exp": "/amount",
+            "operator": "equals",
+            "cases": {
+              "999999999": "Insufficient Funds",
+              "default": "Transfer OK"
+            }
+          }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+            examples:
+              Transfer OK:
+                value:
+                  source_account: ACC001
+                  destination_cbu: '0720461288000004610099'
+                  amount: 1000
+                  currency: ARS
+                  description: Pago alquiler
+              Insufficient Funds:
+                value:
+                  source_account: ACC001
+                  destination_cbu: '0720461288000004610099'
+                  amount: 999999999
+                  currency: ARS
+                  description: Compra masiva
+      responses:
+        '201':
+          description: Transferencia realizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+              examples:
+                Transfer OK:
+                  value:
+                    transfer_id: TRF-2024-999
+                    status: completed
+                    source_account: ACC001
+                    destination_cbu: '0720461288000004610099'
+                    amount: 1000
+                    currency: ARS
+                    description: Pago alquiler
+                    timestamp: '2024-01-15T12:00:00Z'
+                    commission: 0
+        '422':
+          description: Saldo insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                Insufficient Funds:
+                  value:
+                    error: insufficient_funds
+                    message: Saldo insuficiente para realizar la transferencia
+                    available_balance: 120000.00
+
+components:
+  schemas:
+    AuthRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+        expires_in:
+          type: integer
+        scope:
+          type: string
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        alias:
+          type: string
+        type:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: number
+        available:
+          type: number
+        cbu:
+          type: string
+        owner:
+          type: object
+          properties:
+            name:
+              type: string
+            cuit:
+              type: string
+        status:
+          type: string
+    TransactionList:
+      type: object
+      properties:
+        account_id:
+          type: string
+        page:
+          type: integer
+        total:
+          type: integer
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+        type:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        balance_after:
+          type: number
+        reference:
+          type: string
+    TransferRequest:
+      type: object
+      properties:
+        source_account:
+          type: string
+        destination_cbu:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+    TransferResponse:
+      type: object
+      properties:
+        transfer_id:
+          type: string
+        status:
+          type: string
+        source_account:
+          type: string
+        destination_cbu:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        timestamp:
+          type: string
+        commission:
+          type: number
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string

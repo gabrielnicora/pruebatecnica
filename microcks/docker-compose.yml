@@ -1,0 +1,80 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # Microcks "uber": app all-in-one (incluye MongoDB embebido, sin Keycloak).
+  # UI + API REST/SOAP mock en http://localhost:8585
+  # ---------------------------------------------------------------------------
+  microcks:
+    image: quay.io/microcks/microcks-uber:latest-native
+    container_name: microcks
+    ports:
+      - "8585:8080"
+    environment:
+      - TEST_CALLBACK_URL=http://microcks:8080
+      - ASYNC_MINION_URL=http://microcks-async-minion:8081
+      - KAFKA_BOOTSTRAP_SERVER=kafka:19092
+    depends_on:
+      - kafka
+
+  # ---------------------------------------------------------------------------
+  # Broker Kafka liviano (Red Panda) para las APIs event-driven.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: redpandadata/redpanda:v24.3.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+
+  # ---------------------------------------------------------------------------
+  # Async minion: publica los mensajes mock (AsyncAPI) a Kafka y WebSocket.
+  # ---------------------------------------------------------------------------
+  microcks-async-minion:
+    image: quay.io/microcks/microcks-uber-async-minion:latest
+    container_name: microcks-async-minion
+    depends_on:
+      - microcks
+      - kafka
+    ports:
+      - "8586:8081"
+    environment:
+      - MICROCKS_HOST_PORT=microcks:8080
+      - ASYNC_PROTOCOLS=WS,KAFKA
+      - KAFKA_BOOTSTRAP_SERVER=kafka:19092
+
+  # ---------------------------------------------------------------------------
+  # Importer: carga los artefactos (OpenAPI, SOAP, AsyncAPI) en Microcks.
+  # Corre una vez; si Microcks aún no está listo reintenta (restart on-failure).
+  # ---------------------------------------------------------------------------
+  importer:
+    image: quay.io/microcks/microcks-cli:latest
+    container_name: microcks-importer
+    depends_on:
+      - microcks
+    restart: on-failure
+    volumes:
+      - ./:/resources:ro
+    command: >
+      import
+      '/resources/openapi/banking-api.yaml:true,/resources/soap/BankLegacyService-soapui-project.xml:true,/resources/asyncapi/account-events-asyncapi.yaml:true'
+      --microcksURL=http://microcks:8080/api
+      --insecure
+      --keycloakClientId=foo
+      --keycloakClientSecret=bar

@@ -1,0 +1,79 @@
+asyncapi: 2.6.0
+info:
+  title: Banking Account Events
+  version: 1.0.0
+  description: |
+    API event-driven del banco. Publica eventos de transacciones a medida que
+    ocurren (acreditaciones, débitos, alertas de fraude). Microcks usa los
+    ejemplos de abajo para publicar mensajes mock periódicamente a Kafka.
+
+defaultContentType: application/json
+
+channels:
+  banking/account/transactions:
+    description: Stream de eventos de transacciones de las cuentas
+    subscribe:
+      operationId: receiveTransactionEvent
+      summary: Recibe un evento cada vez que se registra una transacción
+      x-microcks-operation:
+        # Microcks publica un ejemplo cada 10 segundos
+        frequency: 10
+      message:
+        $ref: '#/components/messages/TransactionEvent'
+
+components:
+  messages:
+    TransactionEvent:
+      name: TransactionEvent
+      title: Evento de transacción bancaria
+      contentType: application/json
+      payload:
+        type: object
+        properties:
+          event_id:
+            type: string
+          account_id:
+            type: string
+          type:
+            type: string
+            enum: [credit, debit, fraud_alert]
+          amount:
+            type: number
+          currency:
+            type: string
+          description:
+            type: string
+          timestamp:
+            type: string
+            format: date-time
+      examples:
+        - name: credit_event
+          summary: Acreditación recibida
+          payload:
+            event_id: EVT-{{randomString(8)}}
+            account_id: ACC001
+            type: credit
+            amount: 50000.00
+            currency: ARS
+            description: Transferencia recibida - ACME S.A.
+            timestamp: '{{now(yyyy-MM-dd''T''HH:mm:ss''Z'')}}'
+        - name: debit_event
+          summary: Débito por pago de servicios
+          payload:
+            event_id: EVT-{{randomString(8)}}
+            account_id: ACC001
+            type: debit
+            amount: 12000.00
+            currency: ARS
+            description: Pago servicios - Empresa XYZ
+            timestamp: '{{now(yyyy-MM-dd''T''HH:mm:ss''Z'')}}'
+        - name: fraud_alert_event
+          summary: Alerta de posible fraude
+          payload:
+            event_id: EVT-{{randomString(8)}}
+            account_id: ACC001
+            type: fraud_alert
+            amount: 999999.00
+            currency: ARS
+            description: Movimiento inusual detectado - revisión requerida
+            timestamp: '{{now(yyyy-MM-dd''T''HH:mm:ss''Z'')}}'
