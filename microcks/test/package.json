@@ -1,0 +1,14 @@
+{
+  "name": "bank-iut",
+  "version": "1.0.0",
+  "description": "Implementation Under Test para contract testing con Microcks",
+  "scripts": {
+    "rest": "node bank-server.js",
+    "soap": "node bank-soap-server.js",
+    "kafka": "node kafka-producer.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "kafkajs": "^2.2.4"
+  }
+}

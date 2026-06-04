@@ -1,0 +1,157 @@
+services:
+
+  # ============================================================
+  # INFRAESTRUCTURA MICROCKS
+  # ============================================================
+
+  microcks:
+    image: quay.io/microcks/microcks-uber:latest-native
+    container_name: microcks
+    ports:
+      - "8585:8080"
+    environment:
+      - TEST_CALLBACK_URL=http://microcks:8080
+      - ASYNC_MINION_URL=http://microcks-async-minion:8081
+      - KAFKA_BOOTSTRAP_SERVER=kafka:19092
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/services"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  kafka:
+    image: redpandadata/redpanda:v24.3.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  microcks-async-minion:
+    image: quay.io/microcks/microcks-uber-async-minion:latest
+    container_name: microcks-async-minion
+    depends_on:
+      microcks:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8586:8081"
+    environment:
+      - MICROCKS_HOST_PORT=microcks:8080
+      - ASYNC_PROTOCOLS=WS,KAFKA
+      - KAFKA_BOOTSTRAP_SERVER=kafka:19092
+
+  importer:
+    image: quay.io/microcks/microcks-cli:latest
+    container_name: microcks-importer
+    depends_on:
+      microcks:
+        condition: service_healthy
+    restart: on-failure
+    volumes:
+      - ./:/resources:ro
+    command: >
+      import
+      '/resources/openapi/banking-api.yaml:true,/resources/soap/BankLegacyService-soapui-project.xml:true,/resources/asyncapi/account-events-asyncapi.yaml:true'
+      --microcksURL=http://microcks:8080/api
+      --insecure
+      --keycloakClientId=foo
+      --keycloakClientSecret=bar
+
+  # ============================================================
+  # IMPLEMENTATIONS UNDER TEST (IUT)
+  # Implementaciones "reales" que Microcks va a contract-testear.
+  # ============================================================
+
+  bank-api-server:
+    # IUT REST: implementa Banking API. Con BUGGY=true introduce un bug
+    # en /transactions (total: 99) para demostrar detección de violaciones.
+    build:
+      context: ./test
+    container_name: bank-api-server
+    command: node bank-server.js
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - BUGGY=false   # cambiar a "true" para ver un test fallando
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/accounts/ACC001"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bank-soap-server:
+    # IUT SOAP: implementa BankLegacyService.
+    build:
+      context: ./test
+    container_name: bank-soap-server
+    command: node bank-soap-server.js
+    ports:
+      - "3001:3001"
+    environment:
+      - SOAP_PORT=3001
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  kafka-producer:
+    # IUT Async: publica eventos de transacciones a Kafka cada 3s.
+    # Microcks los captura y valida contra el AsyncAPI durante el contract test.
+    build:
+      context: ./test
+    container_name: kafka-producer
+    command: node kafka-producer.js
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_BROKER=kafka:19092
+
+  # ============================================================
+  # CONTRACT TESTER
+  # Espera a que todo esté listo e importado y corre los 3 tests.
+  # ============================================================
+
+  contract-tester:
+    image: quay.io/microcks/microcks-cli:latest
+    container_name: contract-tester
+    depends_on:
+      microcks:
+        condition: service_healthy
+      bank-api-server:
+        condition: service_healthy
+      kafka-producer:
+        condition: service_started
+    restart: on-failure
+    volumes:
+      - ./test:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/run-contract-tests.sh"]

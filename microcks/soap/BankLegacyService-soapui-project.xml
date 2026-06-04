@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<con:soapui-project id="a1b2c3d4-0000-0000-0000-000000000001" activeEnvironment="Default" name="BankLegacyService" resourceRoot="" soapui-version="5.2.1" abortOnError="false" runType="SEQUENTIAL" xmlns:con="http://eviware.com/soapui/config"><con:settings/><con:interface xsi:type="con:WsdlInterface" id="a1b2c3d4-0000-0000-0000-000000000002" wsaVersion="NONE" name="BankLegacyService" type="wsdl" bindingName="{http://bank.example.com/legacy}BankLegacyServiceSoapBinding" soapVersion="1_1" anonymous="optional" definition="file:/BankLegacyService.wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="file:/BankLegacyService.wsdl"><con:part><con:url>file:/BankLegacyService.wsdl</con:url><con:content><![CDATA[<wsdl:definitions name="BankLegacyService" targetNamespace="http://bank.example.com/legacy" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="http://bank.example.com/legacy" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/">
+  <wsdl:types>
+    <xs:schema attributeFormDefault="unqualified" elementFormDefault="unqualified" targetNamespace="http://bank.example.com/legacy" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="GetAccountStatement" type="tns:GetAccountStatement"/>
+      <xs:element name="GetAccountStatementResponse" type="tns:GetAccountStatementResponse"/>
+      <xs:complexType name="GetAccountStatement">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="accountId" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+      <xs:complexType name="GetAccountStatementResponse">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="accountId" type="xs:string"/>
+          <xs:element minOccurs="0" name="holder" type="xs:string"/>
+          <xs:element minOccurs="0" name="balance" type="xs:decimal"/>
+          <xs:element minOccurs="0" name="currency" type="xs:string"/>
+          <xs:element minOccurs="0" name="status" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  </wsdl:types>
+  <wsdl:message name="GetAccountStatementResponse">
+    <wsdl:part element="tns:GetAccountStatementResponse" name="parameters"/>
+  </wsdl:message>
+  <wsdl:message name="GetAccountStatement">
+    <wsdl:part element="tns:GetAccountStatement" name="parameters"/>
+  </wsdl:message>
+  <wsdl:portType name="BankLegacyService">
+    <wsdl:operation name="GetAccountStatement">
+      <wsdl:input message="tns:GetAccountStatement" name="GetAccountStatement"/>
+      <wsdl:output message="tns:GetAccountStatementResponse" name="GetAccountStatementResponse"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="BankLegacyServiceSoapBinding" type="tns:BankLegacyService">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetAccountStatement">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="GetAccountStatement">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="GetAccountStatementResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="BankLegacyService">
+    <wsdl:port binding="tns:BankLegacyServiceSoapBinding" name="BankLegacyServiceEndpointPort">
+      <soap:address location="http://localhost:8080/services/BankLegacyService"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://localhost:8080/services/BankLegacyService</con:endpoint></con:endpoints><con:operation id="a1b2c3d4-0000-0000-0000-000000000003" isOneWay="false" action="" name="GetAccountStatement" bindingOperationName="GetAccountStatement" type="Request-Response" outputName="GetAccountStatementResponse" inputName="GetAccountStatement" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/></con:operation></con:interface><con:testSuite id="a1b2c3d4-0000-0000-0000-000000000010" name="BankLegacyService TestSuite"><con:settings/><con:runType>SEQUENTIAL</con:runType><con:testCase id="a1b2c3d4-0000-0000-0000-000000000011" failOnError="true" failTestCaseOnErrors="true" keepSession="false" maxResults="0" name="GetAccountStatement TestCase" searchProperties="true"><con:settings/><con:testStep type="request" id="a1b2c3d4-0000-0000-0000-000000000012" name="ACC001 Request"><con:settings/><con:config xsi:type="con:RequestStep" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:interface>BankLegacyService</con:interface><con:operation>GetAccountStatement</con:operation><con:request name="ACC001 Request" id="a1b2c3d4-0000-0000-0000-000000000013"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8080/services/BankLegacyService</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <leg:GetAccountStatement>
+         <accountId>ACC001</accountId>
+      </leg:GetAccountStatement>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials></con:request></con:config></con:testStep><con:testStep type="request" id="a1b2c3d4-0000-0000-0000-000000000014" name="Unknown Request"><con:settings/><con:config xsi:type="con:RequestStep" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:interface>BankLegacyService</con:interface><con:operation>GetAccountStatement</con:operation><con:request name="Unknown Request" id="a1b2c3d4-0000-0000-0000-000000000015"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8080/services/BankLegacyService</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <leg:GetAccountStatement>
+         <accountId>UNKNOWN</accountId>
+      </leg:GetAccountStatement>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials></con:request></con:config></con:testStep><con:properties/></con:testCase><con:properties/></con:testSuite><con:mockService id="a1b2c3d4-0000-0000-0000-000000000020" port="8088" path="/mockBankLegacyService" host="localhost" name="BankLegacyService Mock"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.mock.WsdlMockService@require-soap-action">false</con:setting></con:settings><con:properties><con:property><con:name>version</con:name><con:value>1.0</con:value></con:property></con:properties><con:mockOperation name="GetAccountStatement" id="a1b2c3d4-0000-0000-0000-000000000021" interface="BankLegacyService" operation="GetAccountStatement"><con:settings/><con:defaultResponse>Unknown Response</con:defaultResponse><con:dispatchStyle>SCRIPT</con:dispatchStyle><con:dispatchPath>import com.eviware.soapui.support.XmlHolder
+def holder = new XmlHolder( mockRequest.requestContent )
+def acc = holder["//accountId"]
+
+if (acc == "ACC001"){
+    return "ACC001 Response"
+} else {
+    return "Unknown Response"
+}
+</con:dispatchPath><con:response name="ACC001 Response" id="a1b2c3d4-0000-0000-0000-000000000022" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <leg:GetAccountStatementResponse>
+         <accountId>ACC001</accountId>
+         <holder>Juan Pérez</holder>
+         <balance>125430.50</balance>
+         <currency>ARS</currency>
+         <status>active</status>
+      </leg:GetAccountStatementResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent></con:response><con:response name="Unknown Response" id="a1b2c3d4-0000-0000-0000-000000000023" httpResponseStatus="500" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <soapenv:Fault>
+         <faultcode>soapenv:Client</faultcode>
+         <faultstring>account_not_found</faultstring>
+         <detail>
+            <leg:error>
+               <message>La cuenta no existe o no pertenece al usuario</message>
+            </leg:error>
+         </detail>
+      </soapenv:Fault>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent></con:response></con:mockOperation></con:mockService><con:properties/><con:wssContainer/><con:oAuth2ProfileContainer/><con:sensitiveInformation/></con:soapui-project>
