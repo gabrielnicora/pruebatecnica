@@ -1,7 +1,7 @@
 # POC Microcks — Virtualización bancaria (REST + SOAP + Event-Driven)
 
 Segunda variante de la POC, usando [Microcks](https://microcks.io) en vez de mountebank.
-Demuestra los **3 mundos** de virtualización con una sola herramienta:
+Demuestra los **3 mundos** de virtualización + **contract testing** con una sola herramienta:
 
 | Tipo | Servicio | Artefacto |
 |---|---|---|
@@ -12,91 +12,178 @@ Demuestra los **3 mundos** de virtualización con una sola herramienta:
 ## Arquitectura
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌──────────────┐
-│  microcks-uber  │────▶│ microcks-async-minion│────▶│ kafka        │
-│  REST + SOAP    │     │  publica eventos      │     │ (Red Panda)  │
-│  UI :8585       │     │  AsyncAPI             │     │ :9092        │
-└─────────────────┘     └──────────────────────┘     └──────────────┘
-        ▲
-        │ importa los 3 artefactos al arrancar
-   ┌──────────┐
-   │ importer │ (microcks-cli)
-   └──────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  Mocking                             Contract Testing                  │
+│                                                                        │
+│  ┌────────────────┐   importa        ┌───────────────────────────┐    │
+│  │  OpenAPI YAML  │ ─────────────┐   │  bank-api-server :3000    │    │
+│  │  WSDL/SoapUI  │               │   │  (REST IUT — Express)     │    │
+│  │  AsyncAPI YAML │ ─────────┐   │   └───────────────────────────┘    │
+│  └────────────────┘         │   │   ┌───────────────────────────┐    │
+│                              │   │   │  bank-soap-server :3001   │    │
+│  ┌────────────────┐          │   │   │  (SOAP IUT — Express)     │    │
+│  │  microcks-uber │◀─────────┘   │   └───────────────────────────┘    │
+│  │  UI :8585      │              │   ┌───────────────────────────┐    │
+│  │  API :8585     │◀─────────────┘   │  kafka-producer           │    │
+│  └───────┬────────┘  lanza tests     │  (Async IUT — KafkaJS)    │    │
+│          │           contra IUTs     └────────────┬──────────────┘    │
+│  ┌───────▼──────────────┐                        │                   │
+│  │  microcks-async-     │       ┌────────────────▼──────────┐        │
+│  │  minion :8586        │       │  kafka (Red Panda) :9092  │        │
+│  │  (publica AsyncAPI   │──────▶│  topic: Banking Account   │        │
+│  │   a Kafka)           │       │  Events-1.0.0-...         │        │
+│  └──────────────────────┘       └───────────────────────────┘        │
+│                                                                        │
+│  ┌───────────────────────────────────────────────────────────────┐   │
+│  │  contract-tester  (microcks-cli)                              │   │
+│  │  1. REST:  Banking API vs bank-api-server    → HTTP           │   │
+│  │  2. SOAP:  BankLegacyService vs bank-soap-server → SOAP_HTTP  │   │
+│  │  3. Async: Banking Events vs kafka-producer  → ASYNC_API      │   │
+│  └───────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Microcks uber**: imagen all-in-one (MongoDB embebido, sin Keycloak).
-- **Red Panda**: broker compatible Kafka, liviano, para los eventos.
-- **async-minion**: publica los mensajes mock del AsyncAPI a Kafka/WebSocket.
-- **importer**: carga los artefactos automáticamente vía `microcks-cli`.
+## Estructura de archivos
+
+```
+microcks/
+├── openapi/
+│   └── banking-api.yaml              OpenAPI 3.0 con x-microcks-operation
+├── soap/
+│   └── BankLegacyService-soapui-project.xml  WSDL + ejemplos embebidos
+├── asyncapi/
+│   └── account-events-asyncapi.yaml  AsyncAPI 2.6 con frecuencia de publicación
+├── test/
+│   ├── bank-server.js                IUT REST (Express) — BUGGY flag incluido
+│   ├── bank-soap-server.js           IUT SOAP (Express + raw XML)
+│   ├── kafka-producer.js             IUT Async (KafkaJS, publica c/3s)
+│   ├── run-contract-tests.sh         Orquestador de los 3 contract tests
+│   ├── Dockerfile                    Imagen compartida para los 3 IUTs
+│   └── package.json
+└── docker-compose.yml                Stack completo (infra + IUTs + tester)
+```
 
 ## Cómo levantarlo
 
+### Solo mocking (sin contract tests)
+
 ```bash
 cd microcks
-docker compose up -d
+docker compose up microcks kafka microcks-async-minion importer -d
 ```
 
-Esperá ~30-40s a que Microcks arranque e importe los artefactos. Luego abrí la UI:
+UI en `http://localhost:8585` — verás los 3 servicios importados.
+
+### Stack completo con contract testing
+
+```bash
+cd microcks
+docker compose up --build
+```
+
+Los logs del `contract-tester` muestran el resultado de cada test:
 
 ```
-http://localhost:8585
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪  Contract Test: Banking REST API
+    API:    Banking API:1.0.0
+    IUT:    http://bank-api-server:3000
+    Runner: HTTP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅  PASS — Banking REST API
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪  Contract Test: BankLegacyService SOAP
+...
+✅  PASS — BankLegacyService SOAP
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪  Contract Test: Banking Account Events (Kafka)
+...
+✅  PASS — Banking Account Events (Kafka)
+
+════════════════════════════════════════════
+  RESULTADOS DE CONTRACT TESTING
+  ✅  PASS: 3
+  ❌  FAIL: 0
+════════════════════════════════════════════
 ```
 
-Vas a ver 3 APIs/servicios cargados: **Banking API 1.0.0**, **BankLegacyService 1.0**
-y **Banking Account Events 1.0.0**.
+## Demostrar una violación de contrato (bug intencional)
 
-> Si el contenedor `importer` corrió antes de que Microcks estuviera listo,
-> tiene `restart: on-failure` y reintenta solo. Podés forzar la importación con
-> `docker compose up importer`.
+El `bank-server.js` tiene un flag `BUGGY` que introduce un bug en el campo
+`total` del endpoint de transacciones (devuelve `99` en vez del total real).
+Microcks lo detecta porque el ejemplo del OpenAPI fija ese valor.
 
-## Probar los mocks
+Para verlo fallar, editá el `docker-compose.yml` y cambiá:
 
-### 1. REST — Banking API
+```yaml
+bank-api-server:
+  environment:
+    - BUGGY=true     # ← activa el bug
+```
 
-Microcks expone los mocks bajo `/rest/{servicio}/{version}/...`:
+O bien arrancá solo ese servicio con la variable sobreescrita:
+
+```bash
+docker compose up --build -d
+docker compose run --rm -e BUGGY=true bank-api-server
+```
+
+El log del `contract-tester` mostrará:
+
+```
+❌  FAIL — Banking REST API
+
+════════════════════════════════════════════
+  RESULTADOS DE CONTRACT TESTING
+  ✅  PASS: 2
+  ❌  FAIL: 1
+════════════════════════════════════════════
+```
+
+Y en la UI de Microcks (`http://localhost:8585`) podés ver el detalle del test
+fallido con el diff entre el valor esperado y el recibido.
+
+## Probar los mocks manualmente (sin contract tests)
+
+### REST — Banking API
 
 ```bash
 BASE=http://localhost:8585/rest/Banking+API/1.0.0
 
-# Auth válida -> 200 + token
+# Auth válida → 200 + JWT mock
 curl -s -X POST $BASE/auth/token \
   -H 'Content-Type: application/json' \
   -d '{"username":"usuario_valido","password":"password123"}'
 
-# Auth inválida -> 401 (despacho por body: username = usuario_invalido)
+# Auth inválida → 401
 curl -s -X POST $BASE/auth/token \
   -H 'Content-Type: application/json' \
   -d '{"username":"usuario_invalido","password":"x"}'
 
-# Cuenta ARS -> 200
+# Cuenta ARS → 200
 curl -s $BASE/accounts/ACC001
 
-# Cuenta USD -> 200
-curl -s $BASE/accounts/ACC002
-
-# Cuenta inexistente -> 404
+# 404
 curl -s $BASE/accounts/NOTFOUND
 
-# Transacciones -> 200
+# Transacciones → 200 (3 movimientos)
 curl -s $BASE/accounts/ACC001/transactions
 
-# Transferencia OK -> 201
+# Transferencia OK → 201
 curl -s -X POST $BASE/transfers -H 'Content-Type: application/json' \
   -d '{"source_account":"ACC001","destination_cbu":"0720461288000004610099","amount":1000,"currency":"ARS","description":"Pago alquiler"}'
 
-# Saldo insuficiente -> 422 (despacho por body: amount = 999999999)
+# Saldo insuficiente → 422
 curl -s -X POST $BASE/transfers -H 'Content-Type: application/json' \
-  -d '{"source_account":"ACC001","destination_cbu":"0720461288000004610099","amount":999999999,"currency":"ARS","description":"Compra masiva"}'
+  -d '{"source_account":"ACC001","destination_cbu":"0720461288000004610099","amount":999999999,"currency":"ARS","description":"x"}'
 ```
 
-> El espacio en `Banking API` se codifica como `+` o `%20` en la URL.
-
-### 2. SOAP — BankLegacyService
-
-Microcks expone los servicios SOAP bajo `/soap/{servicio}/{version}`:
+### SOAP — BankLegacyService
 
 ```bash
-# Cuenta existente -> extracto
+# Cuenta existente → extracto
 curl -s -X POST "http://localhost:8585/soap/BankLegacyService/1.0" \
   -H 'Content-Type: text/xml' \
   -d '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
@@ -105,7 +192,7 @@ curl -s -X POST "http://localhost:8585/soap/BankLegacyService/1.0" \
         </soapenv:Body>
       </soapenv:Envelope>'
 
-# Cuenta desconocida -> SOAP Fault account_not_found
+# Cuenta desconocida → SOAP Fault
 curl -s -X POST "http://localhost:8585/soap/BankLegacyService/1.0" \
   -H 'Content-Type: text/xml' \
   -d '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
@@ -115,43 +202,35 @@ curl -s -X POST "http://localhost:8585/soap/BankLegacyService/1.0" \
       </soapenv:Envelope>'
 ```
 
-El despacho de la respuesta se hace por el contenido de `<accountId>` (script de dispatch).
+### Event-Driven — Kafka
 
-### 3. Event-Driven — Banking Account Events
-
-El `async-minion` publica un evento de transacción **cada 10 segundos** al topic Kafka:
-
-```
-BankingAccountEvents-1.0.0-banking-account-transactions
-```
-
-Consumir desde el contenedor de Red Panda:
+Consumir eventos publicados por el async-minion o el kafka-producer:
 
 ```bash
 docker exec -it kafka rpk topic consume \
-  BankingAccountEvents-1.0.0-banking-account-transactions --brokers localhost:19092
+  BankingAccountEvents-1.0.0-banking-account-transactions \
+  --brokers localhost:19092
 ```
 
-También disponible vía WebSocket:
+WebSocket (desde el navegador o wscat):
 
 ```
 ws://localhost:8586/api/ws/BankingAccountEvents/1.0.0/banking/account/transactions
 ```
 
-Rota entre los 3 ejemplos: `credit_event`, `debit_event` y `fraud_alert_event`,
-con campos dinámicos (`event_id` aleatorio, `timestamp` actual) gracias a las
-funciones de templating de Microcks.
+## Conceptos clave
+
+| Concepto | Descripción |
+|---|---|
+| **Artefacto** | OpenAPI / WSDL+SoapUI / AsyncAPI. Fuente de verdad del contrato. |
+| **Mock** | Respuesta generada por Microcks a partir de los ejemplos del artefacto. |
+| **IUT** (Implementation Under Test) | La implementación real del banco bajo prueba. |
+| **Contract Test** | Microcks envía los requests de ejemplo al IUT y valida que las respuestas cumplan el contrato. |
+| **Dispatcher** | Regla en el OpenAPI (`x-microcks-operation`) que define cómo Microcks elige el ejemplo según el request. |
+| **async-minion** | Componente de Microcks que publica los mensajes mock de AsyncAPI al broker. |
 
 ## Bajar todo
 
 ```bash
 docker compose down -v
 ```
-
-## Notas
-
-- Las imágenes usan el tag `latest` por simplicidad de POC. Para reproducibilidad,
-  pineá a una versión concreta (ej. `quay.io/microcks/microcks-uber:1.10.0-native`).
-- A diferencia de la POC con mountebank (mocks escritos a mano en JSON), acá los
-  mocks se **generan a partir del contrato** (OpenAPI/WSDL/AsyncAPI). El contrato
-  es la fuente de verdad y sirve además para contract testing.
