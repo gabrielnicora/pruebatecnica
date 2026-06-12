@@ -1,25 +1,287 @@
+# =============================================================================
+#  MICROCKS POC — Versión técnica COMPLETA
+#  Basada en la configuración OFICIAL de microcks/microcks (install/docker-compose)
+#
+#  Stack:
+#    mongo            → persistencia real (sobrevive reinicios)
+#    keycloak         → autenticación (OPCIONAL, ver toggle abajo)
+#    postman          → runtime para tests de colecciones Postman
+#    app (microcks)   → core
+#    async-minion     → mocking async (WS + Kafka)
+#    kafka (redpanda) → broker
+#    + IUTs del banco (REST, SOAP, Kafka producer)
+#    + importer y contract-tester
+#
+#  ---------------------------------------------------------------------------
+#  TOGGLE DE KEYCLOAK
+#  ---------------------------------------------------------------------------
+#  Las variables viven en el archivo .env (KEYCLOAK_ENABLED y COMPOSE_PROFILES).
+#
+#    CON autenticación (default):   KEYCLOAK_ENABLED=true  COMPOSE_PROFILES=auth
+#    SIN autenticación:             KEYCLOAK_ENABLED=false COMPOSE_PROFILES=
+#
+#  Lo más cómodo es usar el helper ./poc.sh  (up / up-noauth / test / down).
+# =============================================================================
+
 services:
-  mountebank:
-    image: bbyars/mountebank:2.9.1
-    ports:
-      - "2525:2525"
-      - "4545:4545"
+
+  # ===========================================================================
+  # PERSISTENCIA
+  # ===========================================================================
+  mongo:
+    image: mongo:4.4.29
+    container_name: microcks-db
     volumes:
-      - ./mountebank:/imposters
-    command: >
-      start --configfile /imposters/imposters.json
-            --allowInjection
+      - microcks-data:/data/db
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:2525/imposters"]
-      interval: 5s
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ===========================================================================
+  # AUTENTICACIÓN (opcional — solo arranca con el profile "auth")
+  # UI admin: http://localhost:18080   (admin / admin)
+  # Login Microcks: admin / microcks123
+  # ===========================================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.0
+    container_name: microcks-sso
+    profiles: ["auth"]
+    # Alias de red para que Keycloak sea alcanzable con la MISMA URL desde el
+    # navegador (keycloak.localtest.me resuelve a 127.0.0.1 por DNS público) y
+    # desde los contenedores (el alias resuelve al contenedor de Keycloak).
+    # Así el CLI (importer/tester) y el login web usan idéntico host:puerto.
+    networks:
+      default:
+        aliases:
+          - keycloak.localtest.me
+    ports:
+      - "18080:18080"
+    environment:
+      KEYCLOAK_ADMIN: "admin"
+      KEYCLOAK_ADMIN_PASSWORD: "admin"
+      KC_HTTP_PORT: "18080"
+    volumes:
+      - "./keycloak/microcks-realm.json:/opt/keycloak/data/import/microcks-realm.json"
+    command: ["start-dev", "--hostname=http://keycloak.localtest.me:18080", "--import-realm", "--health-enabled=true"]
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo -e 'GET /health/live HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/9000"]
+      start_period: 15s
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ===========================================================================
+  # POSTMAN RUNTIME
+  # ===========================================================================
+  postman:
+    image: quay.io/microcks/microcks-postman-runtime:0.7.2
+    container_name: microcks-postman-runtime
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      start_period: 5s
+      interval: 20s
       timeout: 3s
       retries: 5
 
-  bank-client:
-    build: .
+  # ===========================================================================
+  # MICROCKS CORE
+  # UI: http://localhost:8585
+  # ===========================================================================
+  app:
+    image: quay.io/microcks/microcks:1.11.1
+    container_name: microcks
     depends_on:
-      mountebank:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8585:8080"
+      - "9090:9090"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_MONGODB_URI=mongodb://mongo:27017
+      - SPRING_MONGODB_DATABASE=microcks
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017
+      - SPRING_DATA_MONGODB_DATABASE=microcks
+      - POSTMAN_RUNNER_URL=http://postman:3000
+      - TEST_CALLBACK_URL=http://microcks:8080
+      - SERVICES_UPDATE_INTERVAL=0 0 0/2 * * *
+      - ASYNC_MINION_URL=http://microcks-async-minion:8081
+      - KAFKA_BOOTSTRAP_SERVER=kafka:19092
+      # ── Keycloak (se ignora todo si KEYCLOAK_ENABLED=false) ────────────────
+      # Una sola URL (keycloak.localtest.me:18080) válida para browser+app+CLI.
+      - KEYCLOAK_ENABLED=${KEYCLOAK_ENABLED:-true}
+      - KEYCLOAK_URL=http://keycloak.localtest.me:18080
+      - KEYCLOAK_PUBLIC_URL=http://keycloak.localtest.me:18080
+      - JAVA_OPTIONS=-Dspring.security.oauth2.resourceserver.jwt.issuer-uri=http://keycloak.localtest.me:18080/realms/microcks -Dspring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://keycloak.localtest.me:18080/realms/microcks/protocol/openid-connect/certs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      start_period: 40s
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ===========================================================================
+  # ASYNC MINION (WS + Kafka)
+  # ===========================================================================
+  async-minion:
+    # Imagen NO-uber, emparejada con la app no-uber. Usa config por archivos
+    # (./config) y recibe los updates de servicios vía Kafka (no WebSocket).
+    image: quay.io/microcks/microcks-async-minion:1.11.1
+    container_name: microcks-async-minion
+    # La app llama al minion por "microcks-async-minion" (ASYNC_MINION_URL).
+    # En compose los servicios se resuelven por nombre de servicio, no por
+    # container_name, así que agregamos el alias de red.
+    networks:
+      default:
+        aliases:
+          - microcks-async-minion
+    depends_on:
+      app:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8586:8081"
+    volumes:
+      - "./config:/deployments/config"
+    environment:
+      - QUARKUS_PROFILE=docker-compose
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/q/health/ready"]
+      start_period: 15s
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ===========================================================================
+  # KAFKA (RedPanda — compatible, un solo contenedor)
+  # ===========================================================================
+  kafka:
+    image: redpandadata/redpanda:v24.3.1
+    container_name: microcks-kafka
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ===========================================================================
+  # IMPLEMENTATIONS UNDER TEST (IUT) — implementaciones "reales" del banco
+  # ===========================================================================
+  bank-api-server:
+    build:
+      context: ./test
+    container_name: bank-api-server
+    command: node bank-server.js
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - BUGGY=false   # "true" para demostrar detección de violación de contrato
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/accounts/ACC001"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bank-soap-server:
+    build:
+      context: ./test
+    container_name: bank-soap-server
+    command: node bank-soap-server.js
+    ports:
+      - "3001:3001"
+    environment:
+      - SOAP_PORT=3001
+    healthcheck:
+      test: ["CMD", "node", "-e",
+             "var c=require('net').createConnection(3001,'127.0.0.1');c.on('connect',function(){c.end();process.exit(0)});c.on('error',function(){process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  kafka-producer:
+    build:
+      context: ./test
+    container_name: kafka-producer
+    command: node kafka-producer.js
+    depends_on:
+      kafka:
         condition: service_healthy
     environment:
-      - BANK_URL=http://mountebank:4545
-    command: node src/index.js
+      - KAFKA_BROKER=kafka:19092
+
+  # ===========================================================================
+  # IMPORTADOR — sube los 3 artefactos a Microcks
+  # ===========================================================================
+  importer:
+    image: quay.io/microcks/microcks-cli:1.0.2
+    container_name: microcks-importer
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: on-failure
+    volumes:
+      - ./:/resources:ro
+    entrypoint: ["microcks"]
+    command:
+      - import
+      - '/resources/openapi/banking-api.yaml:true,/resources/soap/BankLegacyService-soapui-project.xml:true,/resources/asyncapi/account-events-asyncapi.yaml:true'
+      - --microcksURL=http://microcks:8080/api
+      - --insecure-tls
+      - --keycloakClientId=${KC_CLIENT_ID:-microcks-serviceaccount}
+      - --keycloakClientSecret=${KC_CLIENT_SECRET:-ab54d329-e435-41ae-a900-ec6b3fe15c54}
+
+  # ===========================================================================
+  # CONTRACT TESTER — corre los 3 tests de contrato
+  # ===========================================================================
+  contract-tester:
+    image: quay.io/microcks/microcks-cli:1.0.2
+    container_name: contract-tester
+    depends_on:
+      app:
+        condition: service_healthy
+      importer:
+        condition: service_completed_successfully
+      bank-api-server:
+        condition: service_healthy
+      bank-soap-server:
+        condition: service_healthy
+      kafka-producer:
+        condition: service_started
+    # Sin restart: el tester corre UNA vez. Si un test falla, sale con código !=0
+    # y NO debe reintentar en loop.
+    volumes:
+      - ./test:/scripts:ro
+    environment:
+      - KC_CLIENT_ID=${KC_CLIENT_ID:-microcks-serviceaccount}
+      - KC_CLIENT_SECRET=${KC_CLIENT_SECRET:-ab54d329-e435-41ae-a900-ec6b3fe15c54}
+    entrypoint: ["/bin/sh", "/scripts/run-contract-tests.sh"]
+
+volumes:
+  microcks-data:
+    driver: local
