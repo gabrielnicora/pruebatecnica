@@ -13,8 +13,16 @@ const express = require('express');
 const PORT = process.env.SOAP_PORT || 3001;
 const app = express();
 
-app.use(express.text({ type: ['text/xml', 'application/soap+xml', 'application/xml'] }));
-app.use(express.raw({ type: '*/*' }));
+// Lee el body crudo como texto: el SOAP_HTTP runner de Microcks no envía
+// Content-Type, así que express.text / express.raw no parsean nada.
+app.use((req, res, next) => {
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('end', () => {
+    req.body = Buffer.concat(chunks).toString('utf8');
+    next();
+  });
+});
 
 function extractAccountId(body) {
   const str = body ? body.toString() : '';
@@ -39,20 +47,20 @@ function accountStatementResponse(accountId) {
 }
 
 function soapFaultResponse(accountId) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <soapenv:Fault>
-      <faultcode>soapenv:Client</faultcode>
-      <faultstring>account_not_found</faultstring>
-      <detail>
-        <leg:error>
-          <message>La cuenta no existe o no pertenece al usuario</message>
-        </leg:error>
-      </detail>
-    </soapenv:Fault>
-  </soapenv:Body>
+  // Estructura conforme al mock recordado en Microcks (Unknown Response).
+  return `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <soapenv:Fault>
+         <faultcode>soapenv:Client</faultcode>
+         <faultstring>account_not_found</faultstring>
+         <detail>
+            <leg:error>
+               <message>La cuenta no existe o no pertenece al usuario</message>
+            </leg:error>
+         </detail>
+      </soapenv:Fault>
+   </soapenv:Body>
 </soapenv:Envelope>`;
 }
 

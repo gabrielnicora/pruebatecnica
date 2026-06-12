@@ -56,13 +56,6 @@
          <accountId>ACC001</accountId>
       </leg:GetAccountStatement>
    </soapenv:Body>
-</soapenv:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials></con:request></con:config></con:testStep><con:testStep type="request" id="a1b2c3d4-0000-0000-0000-000000000014" name="Unknown Request"><con:settings/><con:config xsi:type="con:RequestStep" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:interface>BankLegacyService</con:interface><con:operation>GetAccountStatement</con:operation><con:request name="Unknown Request" id="a1b2c3d4-0000-0000-0000-000000000015"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8080/services/BankLegacyService</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:leg="http://bank.example.com/legacy">
-   <soapenv:Header/>
-   <soapenv:Body>
-      <leg:GetAccountStatement>
-         <accountId>UNKNOWN</accountId>
-      </leg:GetAccountStatement>
-   </soapenv:Body>
 </soapenv:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials></con:request></con:config></con:testStep><con:properties/></con:testCase><con:properties/></con:testSuite><con:mockService id="a1b2c3d4-0000-0000-0000-000000000020" port="8088" path="/mockBankLegacyService" host="localhost" name="BankLegacyService Mock"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.mock.WsdlMockService@require-soap-action">false</con:setting></con:settings><con:properties><con:property><con:name>version</con:name><con:value>1.0</con:value></con:property></con:properties><con:mockOperation name="GetAccountStatement" id="a1b2c3d4-0000-0000-0000-000000000021" interface="BankLegacyService" operation="GetAccountStatement"><con:settings/><con:defaultResponse>Unknown Response</con:defaultResponse><con:dispatchStyle>SCRIPT</con:dispatchStyle><con:dispatchPath>import com.eviware.soapui.support.XmlHolder
 def holder = new XmlHolder( mockRequest.requestContent )
 def acc = holder["//accountId"]

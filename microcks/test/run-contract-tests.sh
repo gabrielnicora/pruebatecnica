@@ -3,9 +3,19 @@
 # Espera a que Microcks importe los 3 artefactos y luego corre los tests.
 
 MICROCKS_URL="http://microcks:8080/api"
+# /api/health es PÚBLICO (no requiere token). /api/services está protegido
+# cuando Keycloak está activo, así que NO sirve para el readiness check.
+HEALTH_URL="http://microcks:8080/api/health"
 REST_IUT="http://bank-api-server:3000"
 SOAP_IUT="http://bank-soap-server:3001"
-KAFKA_IUT="kafka://kafka:19092"
+KAFKA_IUT="kafka://kafka:19092/BankingAccountEvents-1.0.0-banking-account-transactions"
+
+# Modo no-auth (KEYCLOAK_ENABLED=false): el compose no define estas vars, así que
+#   caen a foo/bar (el CLI detecta keycloak deshabilitado y omite el token).
+# Modo auth (KEYCLOAK_ENABLED=true): el compose pasa las credenciales reales del
+#   service account del realm.
+KC_CLIENT_ID="${KC_CLIENT_ID:-foo}"
+KC_CLIENT_SECRET="${KC_CLIENT_SECRET:-bar}"
 
 PASS=0
 FAIL=0
@@ -14,21 +24,12 @@ FAIL=0
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Nota: la importación de artefactos la garantiza el importer (el contract-tester
+# depende de que termine con éxito vía depends_on:service_completed_successfully).
+# No chequeamos /api/services acá porque está protegido cuando Keycloak está
+# activo y no tenemos token en el script.
 wait_for_artifact() {
-  name="$1"
-  echo ""
-  echo "⏳  Esperando a que '$name' esté importado en Microcks..."
-  attempts=0
-  while [ $attempts -lt 30 ]; do
-    if wget -qO- "$MICROCKS_URL/services" 2>/dev/null | grep -q "$name"; then
-      echo "✅  '$name' importado."
-      return 0
-    fi
-    sleep 5
-    attempts=$((attempts + 1))
-  done
-  echo "❌  Timeout esperando '$name'. Continuando de todos modos..."
-  return 1
+  echo "✅  '$1' (importación garantizada por el importer)."
 }
 
 run_test() {
@@ -46,11 +47,11 @@ run_test() {
   echo "    Runner:   $runner"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  microcks-cli test "$api" "$endpoint" "$runner" \
+  microcks test "$api" "$endpoint" "$runner" \
     --microcksURL="$MICROCKS_URL" \
-    --insecure \
-    --keycloakClientId=foo \
-    --keycloakClientSecret=bar \
+    --insecure-tls \
+    --keycloakClientId="$KC_CLIENT_ID" \
+    --keycloakClientSecret="$KC_CLIENT_SECRET" \
     --waitFor="$wait_sec" \
     --verbose
 
@@ -68,7 +69,7 @@ run_test() {
 # ---------------------------------------------------------------------------
 echo ""
 echo "🔄  Esperando que Microcks esté disponible..."
-until wget -qO- "$MICROCKS_URL/services" > /dev/null 2>&1; do
+until curl -fsS "$HEALTH_URL" > /dev/null 2>&1; do
   sleep 5
 done
 echo "✅  Microcks listo."
@@ -93,12 +94,12 @@ run_test \
   "Banking REST API" \
   "Banking API:1.0.0" \
   "$REST_IUT" \
-  "HTTP" \
+  "OPEN_API_SCHEMA" \
   "10sec"
 
 run_test \
   "BankLegacyService SOAP" \
-  "BankLegacyService:1.0" \
+  "BankLegacyService Mock:1.0" \
   "$SOAP_IUT" \
   "SOAP_HTTP" \
   "8sec"
@@ -107,7 +108,7 @@ run_test \
   "Banking Account Events (Kafka)" \
   "Banking Account Events:1.0.0" \
   "$KAFKA_IUT" \
-  "ASYNC_API" \
+  "ASYNC_API_SCHEMA" \
   "15sec"
 
 # ---------------------------------------------------------------------------
